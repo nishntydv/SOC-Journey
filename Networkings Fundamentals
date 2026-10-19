@@ -1,1 +1,306 @@
 tcp udp
+🛡️ Windows Fundamentals for SOC Analysts
+Track: SOC Analyst Foundations
+Focus: Windows internals, endpoint telemetry, and investigation fundamentals
+
+Detailed study report focused only on the Windows concepts required to build a strong SOC foundation
+🎯 Scope: Windows architecture, processes & services, users & permissions, file system, registry, PowerShell, and Windows
+Security. The report deliberately excludes unrelated Windows administration and end-user topics.
+🧭 How to use this report: Study each section, reproduce the hands-on commands in a Windows VM, and connect every
+concept to the question: “What evidence would a SOC analyst see if an attacker abused this component?”
+
+📌 1. What You Actually Need to Learn
+Area	SOC Objective	Priority
+Windows architecture	Understand major components and where security telemetry originates.	High
+Processes & services	Identify suspicious execution, parent-child relationships, persistence, and service abuse.	Very High
+Users & permissions	Understand identities, groups, privileges, UAC, and access control.	Very High
+File system	Understand NTFS, permissions, paths, metadata, and attacker-abused locations.	High
+Registry	Understand configuration, persistence, execution, and investigation locations.	Very High
+PowerShell	Understand command execution, scripting, logging, and common abuse patterns.	Very High
+Windows Security	Understand authentication, Defender, firewall, security controls, and security telemetry.	Very High
+
+
+📌 2. Windows Architecture
+🎯 Goal: You do not need to become a Windows kernel developer. You need enough architecture knowledge to
+understand processes, privileges, system calls, security boundaries and where endpoint activity comes from.
+
+🔹 2.1 User Mode vs Kernel Mode
+- User mode: Applications and many Windows services operate with restricted privileges. Examples include browsers,
+  Office applications and many user processes.
+- Kernel mode: Core operating-system components, kernel code and drivers operate with much higher privilege.
+- SOC relevance: Malware attempting to gain higher privileges, load drivers or interact with protected components can
+  create important detection signals.
+🔹 2.2 Major Windows Components
+- Windows Kernel: Provides core operating-system functionality.
+- Executive: Coordinates components such as process/thread management, memory, I/O and security-related functions.
+- Services: Background components that can run without an interactive user session.
+- Winlogon / authentication components: Participate in user logon and session initialization.
+- LSASS: A security-sensitive Windows process involved in authentication and credential-related operations. Unexpected
+  access to it is a major investigation signal.
+- Windows Defender / security components: Provide endpoint protection and telemetry.
+🔹 2.3 Processes, Threads and Handles
+- Process: A running program with its own virtual address space and security context.
+- Thread: A unit of execution inside a process.
+- Handle: A reference used by a process to access operating-system objects such as files, registry keys and processes.🔎 SOC question to ask: Which process started this process, under which account, with what command line, and what
+  did it access?
+📌 3. Processes & Services
+🔹 3.1 Processes — Concepts to Know
+- Process name and executable path
+- PID (Process ID)
+- Parent process / child process relationship
+- User account running the process
+- Command-line arguments
+- Integrity level and privileges
+- Network connections associated with a process
+- Loaded modules/DLLs at a conceptual level
+- Process creation and termination
+🔹 3.2 Normal Windows Processes You Should Recognize
+Process	Why you should recognize it
+explorer.exe	Windows shell / desktop environment.
+svchost.exe	Hosts Windows services; many legitimate instances exist.
+services.exe	Service Control Manager process.
+lsass.exe	Security authority process; highly security-sensitive.
+winlogon.exe	Windows logon/session component.
+csrss.exe	Client/Server Runtime Subsystem; critical Windows process.
+smss.exe	Session Manager; early Windows initialization.
+System	Kernel/system activity; investigate carefully rather than assuming maliciousness.
+powershell.exe	PowerShell process; legitimate but frequently abused.
+cmd.exe	Command Prompt; legitimate but can execute malicious commands.
+
+
+🔹 3.3 Services
+- Understand what a Windows service is and why services can start automatically.
+- Know the Service Control Manager (SCM) concept.
+- Understand service name vs display name.
+- Know that attackers may abuse services for persistence or execution.
+- Learn to investigate unusual service creation, executable paths, accounts and start types.
+Get-Service
+Get-Service | Where-Object {$_.Status -eq 'Running'}
+Get-CimInstance Win32_Service | Select Name,State,StartMode,StartName,PathName
+🔹 3.4 SOC Investigation Checklist — Process
+- Is the executable located in an expected directory?
+- Is the filename pretending to be a legitimate process?
+- What is the parent process?
+- What account executed it?
+- What command line was used?
+- Did it create network connections?
+- Did it create files, scheduled tasks, services or registry changes?
+📌 4. Users, Groups & Permissions
+🔹 4.1 Identity Basics
+- Local user accounts vs domain accounts
+- Security groups and group membership
+- Administrator vs standard-user context
+- Service accounts and why their privileges matter
+- Security identifiers (SIDs) at a conceptual level
+🔹 4.2 Access Control
+- Windows uses access control lists (ACLs) to control access to securable objects.
+- ACE: An access-control entry describing an allow/deny permission for a security principal.
+- Know common permissions: read, write, modify, execute and full control.
+- Understand inheritance conceptually: permissions can flow from parent objects to children.
+🔹 4.3 Privileges and UAC
+- UAC: User Account Control helps reduce the risk of unauthorized elevation of privileges.
+- Understand the difference between being an administrator and running a process with elevated privileges.
+- Know the idea of privilege escalation: obtaining permissions beyond the attacker's initial access.
+🔹 4.4 Commands for Practice
+whoami
+whoami /all
+whoami /groups
+whoami /priv
+whoami /user
+net user
+net localgroup administrators
+Get-LocalUser
+Get-LocalGroup
+Get-LocalGroupMember Administrators
+🔎 SOC questions: Who performed the action? What account was used? Was the account privileged? Was privilege
+elevation involved?
+
+📌 5. Windows File System
+🔹 5.1 NTFS Fundamentals
+- Understand files, directories, paths and file extensions.
+- Understand NTFS permissions and inheritance.
+- Know that file metadata and timestamps can support investigations.
+- Understand that a file's extension does not prove what the file actually is.
+🔹 5.2 Important Locations for SOC Analysts
+Location	SOC relevance
+C:\Windows\System32	Core Windows binaries; unexpected modifications or look-alikes deserve investigation.
+C:\Windows\Temp	Temporary files; may contain installer artifacts or malicious activity.
+%TEMP%	User temporary directory; used by legitimate software and sometimes malware.
+%APPDATA%	User application data; sometimes abused for persistence.
+%LOCALAPPDATA%	Per-user local application data.
+Downloads	Common location for downloaded files and user-delivered payloads.
+Startup folders	Potential persistence location.
+
+
+🔹 5.3 File Investigation Commands
+Get-ChildItem C:\Windows\Temp
+Get-Item 'C:\path\file.exe' | Format-List *
+Get-FileHash 'C:\path\file.exe' -Algorithm SHA256
+Get-Acl 'C:\path\file.exe' | Format-List
+- Learn to identify file path, size, timestamps, hash, owner and ACLs.
+- For suspicious files, compare path + signer + hash + process context rather than judging by filename alone.
+📌 6. Windows Registry
+🔹 6.1 What the Registry Is
+- A hierarchical configuration database used by Windows and applications.
+- It contains settings for the operating system, users, applications and security-related configuration.
+- Registry data is organized into hives, keys, subkeys and values.
+🔹 6.2 Main Hives to Recognize
+- HKLM (HKEY_LOCAL_MACHINE): Machine-wide configuration.
+- HKCU (HKEY_CURRENT_USER): Configuration for the current user.
+- HKCR: Combined view related to classes/file associations.
+- HKU: User profile information for loaded user accounts.
+🔹 6.3 Registry and Persistence
+- Learn the concept of Run/RunOnce persistence locations.
+- Understand that attackers may modify registry configuration to execute code automatically.
+- Do not memorize every registry key; learn the major persistence categories and how to investigate changes.
+reg query HKCU\Software\Microsoft\Windows\CurrentVersion\Run
+reg query HKLM\Software\Microsoft\Windows\CurrentVersion\Run
+Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
+🔎 SOC investigation: identify what value changed, what executable/script it points to, who changed it, when it changed,
+and whether the target is legitimate.
+
+📌 7. PowerShell
+🔹 7.1 Why PowerShell Is Critical for SOC
+- PowerShell is a legitimate Windows automation and administration framework.
+- Because it is powerful and widely available, attackers may use it for execution, discovery, downloading, persistence and
+  lateral movement.
+- The SOC objective is not to block PowerShell blindly; it is to identify suspicious usage and context.
+🔹 7.2 PowerShell Fundamentals
+- Cmdlets and verbs/nouns
+- Objects and pipelines
+- Variables
+- Scripts (.ps1)
+- Execution context and privileges
+- Modules
+- Encoded commands as an investigation clue
+- Remote execution concepts
+🔹 7.3 Commands You Should Be Comfortable Reading
+Get-Process
+Get-Service
+Get-ChildItem
+Get-ItemProperty
+Get-ComputerInfo
+Get-NetIPConfiguration
+Get-NetTCPConnection
+Get-WinEvent -LogName Security -MaxEvents 20
+🔹 7.4 Logging Concepts
+- PowerShell operational logging
+- Script Block Logging
+- Module Logging
+- Transcription
+- Understand that logging configuration affects the evidence available to a SOC analyst.
+🔹 7.5 Suspicious PowerShell Indicators
+- Unexpected PowerShell launched by an unusual parent process.
+- Highly obfuscated or encoded commands.
+- Commands that download or execute remote content.
+- PowerShell running under an unexpected account or from an unusual application.
+- Activity that combines PowerShell with persistence, credential access or lateral movement.⚠️ Important: a suspicious-looking PowerShell command is an investigation lead, not automatically proof of malicious activity.
+📌 8. Windows Security
+🔹 8.1 Authentication
+- Understand authentication vs authorization.
+- Know the basic purpose of NTLM and Kerberos.
+- Understand logon sessions and authentication events at a conceptual level.
+- Learn why repeated failed logons, unusual successful logons and abnormal authentication patterns matter to a SOC.
+🔹 8.2 Windows Security Architecture
+- Security accounts and security principals
+- Access tokens
+- Privileges
+- UAC
+- Security policy
+- Protected processes at a conceptual level
+🔹 8.3 Windows Defender
+- Understand antivirus vs broader endpoint detection and response concepts.
+- Learn what detections, alerts, quarantine and remediation mean.
+- Understand that Defender telemetry can contribute to an investigation alongside Windows events.
+🔹 8.4 Windows Firewall
+- Understand inbound vs outbound rules.
+- Know profiles conceptually: Domain, Private and Public.
+- Understand how firewall activity can support network investigations.
+Get-NetFirewallProfile
+Get-NetFirewallRule | Select DisplayName,Enabled,Direction,Action
+🔹 8.5 Security Event Logs
+Event ID	Meaning / SOC relevance
+4624	Successful logon.
+4625	Failed logon.
+4672	Special privileges assigned to a new logon.
+4688	A new process was created.
+4698	A scheduled task was created.
+4720	A user account was created.
+4728 / 4732	User added to a privileged/security group, depending on group type.
+4740	Account was locked out.
+4768	Kerberos authentication ticket requested.
+4769	Kerberos service ticket requested.
+7045	A new service was installed.
+
+
+📌 9. Hands-On Windows Lab
+Use a Windows virtual machine for practice. Do not perform security testing on systems you do not own or have explicit
+permission to test.
+Lab 1 — Process Investigation
+- Open Task Manager and identify running processes.
+- Use PowerShell to list processes and sort by CPU or memory.
+- Pick a legitimate process and inspect its executable path and account.
+- Use Sysinternals Process Explorer later to compare what additional process information is available.
+Get-Process | Sort-Object CPU -Descending | Select-Object -First 10
+Lab 2 — Users and Privileges
+whoami /all
+Get-LocalUser
+Get-LocalGroupMember Administrators
+- Identify your current user, groups and privileges.
+- Understand which account is privileged and why.
+  Lab 3 — File Investigation
+Get-ChildItem $env:TEMP
+Get-FileHash "$env:WINDIR\System32\notepad.exe" -Algorithm SHA256
+Get-Acl "$env:WINDIR\System32\notepad.exe"
+Lab 4 — Registry
+reg query HKCU\Software\Microsoft\Windows\CurrentVersion\Run
+- Document what startup entries exist on your lab machine.
+  Lab 5 — Event Viewer
+- Open Event Viewer.
+- Navigate to Windows Logs → Security.
+- Find a successful logon (4624) and failed logon (4625) if available.
+- Record timestamp, account, logon type and source information where present.
+  Lab 6 — PowerShell Telemetry
+- Run harmless PowerShell commands and observe what appears in PowerShell logs when logging is enabled.
+- Learn to distinguish command content, process information and authentication context.
+📌 10. SOC Investigation Thinking
+For every Windows alert, train yourself to answer these questions:
+- Who — which account or security principal performed the action?
+- What — what process, command, file, service or registry value was involved?
+- Where — on which host and from which path/source did it occur?
+- When — exact timestamp and sequence of events?
+- How — parent process, command line, authentication method or execution mechanism?
+- Why — is there a legitimate business explanation?
+- What next — what additional telemetry should be checked?
+📌 11. Recommended Study Sequence
+Week/Stage Study Outcome
+1 Windows architecture + processes Understand execution and process relationships.
+2 Services + users + groups + permissions Understand identity, privilege and persistence.
+3 File system + important paths Investigate suspicious files and locations.
+4 Registry Understand configuration and common persistence mechanisms.
+5 PowerShell fundamentals Read and investigate PowerShell activity.
+6 Windows Security + authentication Understand security boundaries and authentication.
+7 Event Logs + important IDs Read endpoint telemetry.
+8 Hands-on investigation Correlate processes, users, files, registry and logs.
+📌 12. What to Exclude for Now
+To keep this report aligned with your SOC goal, these areas are intentionally not treated as core study requirements:
+- Deep Windows kernel-driver development
+- Windows application development
+- Advanced Active Directory administration
+- Group Policy administration in depth
+- Windows deployment/imaging
+- Enterprise backup and storage administration
+- Desktop customization and end-user troubleshooting
+- Deep Windows networking configuration
+- Kernel debugging and reverse engineering
+  These can become useful later, especially Active Directory, Sysmon, EDR and advanced Windows internals, but they are
+  outside the requested Windows Fundamentals scope.
+📌 13. After Completing This Report
+Move next into Sysmon → Microsoft Defender → Defender for Endpoint/XDR → KQL → SOC investigation labs.
+At that point, Windows concepts should be learned through real alerts and telemetry rather than only theory.
+📚 References
+- Microsoft Learn — Windows
+- Microsoft Sysinternals
+- Microsoft Defender XDR
+  Microsoft Sysinternals: https://learn.microsoft.com/en-us/sysinternals/
+  Microsoft Defender XDR: https://learn.m
